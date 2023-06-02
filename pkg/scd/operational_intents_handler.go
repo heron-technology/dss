@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/golang/geo/s2"
-	"github.com/google/uuid"
 	"github.com/interuss/dss/pkg/api"
 	restapi "github.com/interuss/dss/pkg/api/scdv1"
 	dsserr "github.com/interuss/dss/pkg/errors"
@@ -456,34 +455,26 @@ func (a *Server) PutOperationalIntentReference(ctx context.Context, manager stri
 
 		var sub *scdmodels.Subscription
 		if subscriptionID.Empty() {
+			newSubscriptionParams := params.NewSubscription
+
+			if newSubscriptionParams == nil {
+				return stacktrace.NewErrorWithCode(dsserr.BadRequest, "Missing new_subscription in new_subscription")
+			}
+
 			// Create implicit Subscription
-			if params.NewSubscription == nil || params.NewSubscription.UssBaseUrl == "" {
-				return stacktrace.NewErrorWithCode(dsserr.BadRequest, "Missing new_subscription or uss_base_url in new_subscription")
-			}
-			if !a.EnableHTTP {
-				err := scdmodels.ValidateUSSBaseURL(string(params.NewSubscription.UssBaseUrl))
-				if err != nil {
-					return stacktrace.PropagateWithCode(err, dsserr.BadRequest, "Failed to validate USS base URL")
-				}
+			implicitSubscription, err := scdmodels.NewImplicitSubscription(
+				dssmodels.Manager(manager),
+				uExtent,
+				cells,
+				string(newSubscriptionParams.UssBaseUrl),
+				newSubscriptionParams.NotifyForConstraints,
+				!a.EnableHTTP)
+
+			if err != nil {
+				return stacktrace.PropagateWithCode(err, dsserr.BadRequest, "Failed to create new subscription")
 			}
 
-			subToUpsert := scdmodels.Subscription{
-				ID:                          dssmodels.ID(uuid.New().String()),
-				Manager:                     dssmodels.Manager(manager),
-				StartTime:                   uExtent.StartTime,
-				EndTime:                     uExtent.EndTime,
-				AltitudeLo:                  uExtent.SpatialVolume.AltitudeLo,
-				AltitudeHi:                  uExtent.SpatialVolume.AltitudeHi,
-				Cells:                       cells,
-				USSBaseURL:                  string(params.NewSubscription.UssBaseUrl),
-				NotifyForOperationalIntents: true,
-				ImplicitSubscription:        true,
-			}
-			if params.NewSubscription.NotifyForConstraints != nil {
-				subToUpsert.NotifyForConstraints = *params.NewSubscription.NotifyForConstraints
-			}
-
-			sub, err = r.UpsertSubscription(ctx, &subToUpsert)
+			sub, err = r.UpsertSubscription(ctx, implicitSubscription)
 			if err != nil {
 				return stacktrace.Propagate(err, "Failed to create implicit subscription")
 			}

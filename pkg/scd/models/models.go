@@ -50,6 +50,10 @@ func (ovn OVN) String() string {
 	return string(ovn)
 }
 
+func NewOVN(ovn string) OVN {
+	return OVN(ovn)
+}
+
 // Empty returns true if the value of v indicates an empty version.
 func (v VersionNumber) Empty() bool {
 	return v <= 0

@@ -1,8 +1,10 @@
 package models
 
 import (
+	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	restapi "github.com/interuss/dss/pkg/api/scdv1"
 	dsserr "github.com/interuss/dss/pkg/errors"
 	dssmodels "github.com/interuss/dss/pkg/models"
@@ -162,4 +164,71 @@ func (s *Subscription) ValidateDependentOp(operationalIntent *OperationalIntent)
 		return stacktrace.NewError("Subscription does not cover dependent operation's end time, %s", operationalIntent.ID)
 	}
 	return nil
+}
+
+func (s *Subscription) SetNotifyForConstraints(shouldNotifyForConstraints bool) error {
+	s.NotifyForConstraints = shouldNotifyForConstraints
+	return nil
+}
+
+func (s *Subscription) SetUssBaseUrl(url string, validate bool) error {
+	if validate {
+		err := ValidateUSSBaseURL(s.USSBaseURL)
+		if err != nil {
+			return err
+		}
+	}
+	s.USSBaseURL = url
+	return nil
+}
+func (s *Subscription) SetExtent(extent dssmodels.Volume4D) error {
+	s.StartTime = extent.StartTime
+	s.EndTime = extent.EndTime
+	s.AltitudeLo = extent.SpatialVolume.AltitudeLo
+	s.AltitudeHi = extent.SpatialVolume.AltitudeHi
+	return nil
+}
+
+func NewImplicitSubscription(manager dssmodels.Manager, extent *dssmodels.Volume4D, cells s2.CellUnion, ussBaseURL string, shouldNotifyForConstraints *bool, httpsOnly bool) (*Subscription, error) {
+	if ussBaseURL == "" {
+		return nil, stacktrace.NewError("uss_base_url must not be empty")
+	}
+
+	u, err := url.Parse(ussBaseURL)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "uss_base_url is invalid URL")
+	}
+
+	if httpsOnly && u.Scheme != "https" {
+		return nil, stacktrace.NewError("uss_base_url must use https")
+	}
+
+	sub := &Subscription{
+		ID:                          dssmodels.ID(uuid.New().String()),
+		Manager:                     manager,
+		Cells:                       cells,
+		USSBaseURL:                  ussBaseURL,
+		Version:                     NewOVN(""),
+		StartTime:                   nil,
+		EndTime:                     nil,
+		AltitudeHi:                  nil,
+		AltitudeLo:                  nil,
+		NotifyForConstraints:        false,
+		NotifyForOperationalIntents: true,
+		ImplicitSubscription:        true,
+	}
+
+	if extent != nil {
+		if err = sub.SetExtent(*extent); err != nil {
+			return nil, stacktrace.Propagate(err, "Unable to set extent")
+		}
+	}
+
+	if shouldNotifyForConstraints != nil {
+		if err := sub.SetNotifyForConstraints(*shouldNotifyForConstraints); err != nil {
+			return nil, stacktrace.Propagate(err, "Unable to set notify for constraints")
+		}
+	}
+
+	return sub, nil
 }
